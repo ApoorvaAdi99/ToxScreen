@@ -1,0 +1,94 @@
+import os
+import json
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from api.config import settings
+
+class ToxicityClassifier:
+    def __init__(self, artifacts_dir: str):
+        self.artifacts_dir = artifacts_dir
+        self.tokenizer = None
+        self.model = None
+        self.label_map = None
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.load_artifacts()
+
+    def load_artifacts(self):
+        """Load model, tokenizer, and label map from artifacts directory."""
+        if not os.path.exists(self.artifacts_dir):
+            print(f"Artifacts directory {self.artifacts_dir} not found.")
+            return
+
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.artifacts_dir)
+            self.model = AutoModelForSequenceClassification.from_pretrained(self.artifacts_dir)
+            self.model.to(self.device)
+            self.model.eval()
+
+            with open(os.path.join(self.artifacts_dir, "label_map.json"), "r") as f:
+                self.label_map = json.load(f)
+            print(f"Classifier loaded successfully on {self.device}")
+        except Exception as e:
+            print(f"Error loading classifier artifacts: {e}")
+
+    @property
+    def is_loaded(self) -> bool:
+        return self.model is not None and self.tokenizer is not None
+
+    def score_text(self, text: str) -> dict:
+        """Score a single piece of text."""
+        if not self.is_loaded:
+            return {"error": "Classifier not loaded"}
+
+        inputs = self.tokenizer(
+            text, 
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=256, 
+            padding=True
+        ).to(self.device)
+        
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            probs = torch.sigmoid(logits).cpu().numpy()[0]
+
+        labels = {self.label_map[str(i)]: float(probs[i]) for i in range(len(probs))}
+        # Overall is typically the 'toxicity' label or max
+        overall = labels.get("toxicity", max(labels.values()))
+        
+        return {
+            "labels": labels,
+            "overall": overall
+        }
+
+    def score_texts(self, texts: list[str]) -> list[dict]:
+        """Score a list of texts (batch inference)."""
+        if not self.is_loaded:
+            return [{"error": "Classifier not loaded"}] * len(texts)
+
+        inputs = self.tokenizer(
+            texts, 
+            return_tensors="pt", 
+            truncation=True, 
+            max_length=256, 
+            padding=True
+        ).to(self.device)
+        
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            probs = torch.sigmoid(logits).cpu().numpy()
+
+        results = []
+        for p in probs:
+            labels = {self.label_map[str(i)]: float(p[i]) for i in range(len(p))}
+            overall = labels.get("toxicity", max(labels.values()))
+            results.append({
+                "labels": labels,
+                "overall": overall
+            })
+        return results
+
+# Singleton instance
+classifier = ToxicityClassifier(settings.CLASSIFIER_ARTIFACTS_DIR)

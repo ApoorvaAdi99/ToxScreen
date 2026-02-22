@@ -1,0 +1,30 @@
+[project]
+name = "toxicity-rewrite"
+version = "0.1.0"
+description = "ToxScreen — Scalable Toxicity Detection & Rewrite Service"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "transformers",
+    "datasets",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "python-dotenv",
+    "python-json-logger",
+    "httpx",
+    "pytest",
+    "pytest-asyncio",
+    "tqdm",
+    "scikit-learn",
+    "pandas",
+    "numpy",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["api/tests"]
+python_files = "test_*.py"
+
+[tool.setuptools]
+packages = ["api", "classifier"]

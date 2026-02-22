@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./classifier/artifacts:/app/classifier/artifacts
+    environment:
+      - CLASSIFIER_ARTIFACTS_DIR=/app/classifier/artifacts
+      - VLLM_BASE_URL=http://vllm:8000
+      - VLLM_MODEL=${VLLM_MODEL}
+    depends_on:
+      - vllm
+
+  vllm:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.vllm
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL=${VLLM_MODEL}
+    command: ["--model", "${VLLM_MODEL}"]
+    # For GPU support, uncomment below (requires NVIDIA Container Toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]

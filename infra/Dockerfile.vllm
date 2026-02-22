@@ -1,0 +1,6 @@
+# Use official vLLM image
+FROM vllm/vllm-openai:latest
+
+# Set entrypoint to start the OpenAI-compatible server
+# The specific model and other params will be passed via docker-compose env/args
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
