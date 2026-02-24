@@ -1,12 +1,20 @@
 import os
+import sys
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import argparse
 import json
 import torch
-from transformers import Trainer, TrainingArguments, DataCollatorWithPadding, AutoTokenizer
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer, DataCollatorWithPadding
+from datasets import load_dataset
+from tqdm import tqdm
+import numpy as np
+
 from classifier.dataset import preprocess_function
 from classifier.model import load_model
 from classifier.metrics import compute_metrics
-from datasets import load_dataset
 
 def main(args):
     # Load configuration
@@ -17,8 +25,14 @@ def main(args):
         label_map = json.load(f)
         label_cols = [label_map[str(i)] for i in range(len(label_map))]
         
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+        
     print(f"Loading model from {args.artifacts_dir}")
-    model = load_model(args.artifacts_dir)
+    model = load_model(args.artifacts_dir, num_labels=len(label_cols))
+    model.to(device)
+    model.eval()
+    
     tokenizer = AutoTokenizer.from_pretrained(args.artifacts_dir)
     
     # Load test dataset
@@ -36,24 +50,34 @@ def main(args):
     )
     encoded_test.set_format("torch")
     
-    # Setup Trainer for evaluation
-    training_args = TrainingArguments(
-        output_dir=args.artifacts_dir,
-        per_device_eval_batch_size=args.batch_size,
-        report_to="none"
+    # Prepare DataLoader
+    val_loader = DataLoader(
+        encoded_test, 
+        batch_size=args.batch_size, 
+        collate_fn=DataCollatorWithPadding(tokenizer=tokenizer)
     )
     
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        tokenizer=tokenizer,
-        data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
-        compute_metrics=compute_metrics
-    )
-    
-    # Evaluate
+    # Evaluation
     print("Running evaluation...")
-    metrics = trainer.evaluate(encoded_test)
+    all_logits = []
+    all_labels = []
+    
+    with torch.no_grad():
+        for batch in tqdm(val_loader, desc="Evaluating"):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
+            
+            logits = model(input_ids=input_ids, attention_mask=attention_mask)
+            
+            all_logits.append(logits.cpu().numpy())
+            all_labels.append(labels.cpu().numpy())
+            
+    all_logits = np.concatenate(all_logits, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+    
+    # Compute metrics
+    metrics = compute_metrics((all_logits, all_labels))
     
     # Save test metrics
     with open(os.path.join(args.artifacts_dir, "test_metrics.json"), "w") as f:
@@ -62,7 +86,7 @@ def main(args):
     print(f"Test Metrics: {json.dumps(metrics, indent=2)}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate Toxicity Classifier")
+    parser = argparse.ArgumentParser(description="Evaluate Toxicity Classifier (Raw PyTorch)")
     parser.add_argument("--artifacts_dir", type=str, default="classifier/artifacts")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--limit_test", type=int, default=1000)

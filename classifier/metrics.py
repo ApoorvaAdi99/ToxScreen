@@ -10,7 +10,12 @@ def compute_metrics(eval_pred):
     preds = (probs >= 0.5).astype(int)
     
     # Macro metrics
-    roc_auc_macro = roc_auc_score(labels, probs, average="macro")
+    try:
+        roc_auc_macro = roc_auc_score(labels, probs, average="macro")
+    except ValueError:
+        # Fallback if some labels have only one class in the batch
+        roc_auc_macro = 0.5
+        
     f1_macro = f1_score(labels, preds, average="macro", zero_division=0)
     precision_macro = precision_score(labels, preds, average="macro", zero_division=0)
     recall_macro = recall_score(labels, preds, average="macro", zero_division=0)
